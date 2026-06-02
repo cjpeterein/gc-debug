@@ -15,6 +15,11 @@ The symptom surfaces high in the stack (a `gc` command feels slow, an agent stal
 | driver | `dolthub/driver` | The Go `database/sql` driver gc/bd use to talk to a dolt server | a gc/bd dependency |
 | doltlite | `dolthub/doltlite` (`doltlite-python`) | SQLite-backed version-controlled store — an alternative to dolt; **no mysql sql-server, no port** | the consumer's build cache; an on-disk SQLite file |
 
+## Ground-truth sources (consult before tracing or changing behavior)
+
+- **Code** — the repos above (`gastownhall/*`, `dolthub/*`); the consuming `go.mod` pins the exact linked version (see the rule below).
+- **Documented behavior + contracts** — the official Gas City docs, **https://docs.gascityhall.com/llms-full.txt** (the whole corpus in one file). This is where a feature's *intended* behavior and a record's *documented purpose* live — exactly the consumer/contract surface a delete/mutate fix must not break. (gc#2929: `docs/tutorials/07-orders.md` documented that `gc order history` reads the order-tracking beads — the ledger contract the deletion erased; consulting the docs would have surfaced it.)
+
 ## Which layer owns this symptom?
 
 | Symptom | Likely owner(s) | Confirm by |

@@ -9,7 +9,7 @@ description: Use when a Gas City / Gas Town issue (gc, bd/beads, dolt, go-mysql-
 
 Many "gc problems" are actually **bd, dolt, go-mysql-server, vitess, doltlite, driver, or pack** problems. **The layer that shows the symptom is usually not the layer that owns the bug.** This skill traces a complex Gas* issue across the dependency stack to its real root, proves the fix on real data, and lands it as a mergeable upstream PR.
 
-**Core principle:** Trace from the source, not the symptom. A green unit test proves *behavior*, not *scale* — verify on real data before you call it fixed.
+**Core principle:** Trace from the source, not the symptom. A green unit test proves *behavior*, not *scale* — verify on real data before you call it fixed. And a fix that **deletes or mutates shared state must preserve what *else* reads it** — audit the consumers, not just the symptom.
 
 **REQUIRED BACKGROUND:** This skill is `superpowers:systematic-debugging` (no fix without a root cause) and `superpowers:test-driven-development` (the failing test) applied to the Gas* stack, with the concrete gc/bd/dolt toolkit and an upstream-PR finish.
 
@@ -37,25 +37,29 @@ gc        gastownhall/gascity · gastownhall/gastown
      └─ driver    dolthub/driver
 ```
 
-See `references/gas-stack-map.md` for the **"which layer owns this symptom"** heuristics, the upstream repo to PR per layer, and the dolt-vs-doltlite split. Patch the *owning* layer, not the one that surfaced the pain.
+See `references/gas-stack-map.md` for the **"which layer owns this symptom"** heuristics, the upstream repo to PR per layer, the dolt-vs-doltlite split, and the **ground-truth sources** — the repos (code) plus the official docs at **https://docs.gascityhall.com/llms-full.txt** (documented behavior/contracts). Patch the *owning* layer, not the one that surfaced the pain.
 
 ## The arc
 
 1. **Capture state first.** Snapshot config/metrics/logs before touching anything. (`references/safety-floor.md`)
 2. **Gather evidence at the boundaries.** Measure the *exact* resource/path; don't infer it. (`references/gc-diagnostic-toolkit.md`)
-3. **Locate the owning layer** (above) and **source-trace to the exact lines** — first confirm the binary matches the source (`git log -1` vs the running version), or the trace lies.
-4. **RCA discipline.** Coincidence → correlation → causation. State a *falsifiable* hypothesis and name your bias. "It's flaky" is not a diagnosis.
-5. **Diagnose WHERE the time/resource goes.** When something is slow or stuck, measure where it spends its time — don't retry-bigger or bump the timeout.
-6. **Patch + a failing test (TDD).** Watch it fail for the right reason, then write the minimal fix.
-7. **Dogfood on real / production-scale data BEFORE the PR.** A green unit test proves behavior, not scale. Run the fix against real data and confirm the *actual* effect.
-8. **Land it upstream.** Rebase onto the owning repo's `main`; file a thorough PR to the **right** repo. (`references/upstreaming-fixes.md`)
+3. **Search prior art — by symptom — before you dig.** Check the owning repos' Issues + PRs (open *and* closed) for the symptom; a known issue may already carry the diagnosis, a workaround, or a fix in flight. Don't re-trace what's filed — build on it.
+4. **Locate the owning layer** (above) and **source-trace to the exact lines** — first confirm the binary matches the source (`git log -1` vs the running version), or the trace lies.
+5. **RCA discipline.** Coincidence → correlation → causation. State a *falsifiable* hypothesis and name your bias. "It's flaky" is not a diagnosis.
+6. **Diagnose WHERE the time/resource goes.** When something is slow or stuck, measure where it spends its time — don't retry-bigger or bump the timeout.
+7. **Map the blast radius before you change shared state.** If the fix DELETES, MUTATES, or REPURPOSES persistent/shared state (beads, rows, labels, columns, cursors, files), enumerate **every consumer first** — grep the code *and the docs* (incl. the official docs, https://docs.gascityhall.com/llms-full.txt) for who reads it. State that looks like dead bookkeeping may be a ledger, a cursor, or a last-run marker; deleting it erases semantics other code depends on. Don't change it until it's provably unreferenced or its consumers are migrated. If it serves more than one purpose, **separate the concerns** — don't blunt-delete.
+8. **Patch + a failing test (TDD).** Watch it fail for the right reason, then write the minimal fix. For a delete/mutate fix, the test must cover the *semantics the touched data serves* (each consumer from the step above), not just the mechanics of your change.
+9. **Dogfood on real / production-scale data BEFORE the PR.** A green unit test proves behavior, not scale. Run the fix against real data and confirm the *actual* effect — **and that nothing downstream regressed.**
+10. **Land it upstream.** Rebase onto the owning repo's `main`; **first search the repo by your fix / root-cause** — an existing or closed PR may carry prior art, the maintainer's preferred shape, or why it wasn't done; link/build on it, don't dup. Then file a thorough PR to the **right** repo. (`references/upstreaming-fixes.md`)
 
 ## Iron laws
 
+- **Search the owning repo's Issues/PRs first** — by *symptom* before investigating, by *fix* before filing. Don't re-trace or re-file what already exists.
 - Source-trace before you theorize.
 - No fix without a root cause.
 - A falsifiable hypothesis or it's not a diagnosis — name the bias.
 - **Verify on real, production-scale data before claiming done.**
+- **Before deleting or mutating shared state, enumerate its consumers** — test the semantics it serves, not just your change.
 - Nothing destructive without explicit go-ahead; capture state first.
 
 ## Red flags — STOP
@@ -70,6 +74,7 @@ Every row below is a real rationalization from a live trace, and every one was w
 | "Batching will make it faster." | Measure the bottleneck first. The small-N timing already showed per-item cost dominated; batching barely helped. |
 | "The run timed out — bump the timeout / retry bigger." | Diagnose *where* the time goes. It was stuck in an unbounded list query, not the work. |
 | "Patch the layer showing the symptom." | Traverse to the owning layer. A gc-CPU symptom had a gc-lifecycle owner — but the identical symptom could live in gms. |
+| "These rows are just dead bookkeeping — safe to delete." | Prove it. Grep every reader first. Bloat another subsystem queries is a *ledger*, not garbage — deleting it erases history / last-run / cursor state. (gc PR #2929 was CHANGES_REQUESTED for exactly this — see `references/worked-examples.md`.) |
 
 **Any of these means: stop and go back to the trace.**
 
