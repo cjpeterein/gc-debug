@@ -45,7 +45,7 @@ See `references/gas-stack-map.md` for the **"which layer owns this symptom"** he
 2. **Gather evidence at the boundaries.** Measure the *exact* resource/path; don't infer it. **Read the owning component's own logs** — services record their decisions (lifecycle outcomes, deferrals, gate/skip/drop reasons); the root is often a log line, not a deduction. (`references/gc-diagnostic-toolkit.md`)
 3. **Search prior art — by symptom — before you dig.** Check the owning repos' Issues + PRs (open *and* closed) for the symptom; a known issue may already carry the diagnosis, a workaround, or a fix in flight. Don't re-trace what's filed — build on it.
 4. **Locate the owning layer** (above) and **source-trace to the exact lines** — first confirm the binary matches the source (`git log -1` vs the running version), or the trace lies.
-5. **RCA discipline.** Coincidence → correlation → causation. State a *falsifiable* hypothesis and name your bias. "It's flaky" is not a diagnosis.
+5. **RCA discipline.** Coincidence → correlation → causation. State a *falsifiable* hypothesis and name your bias. "It's flaky" is not a diagnosis. **Keep a measured-vs-assumed ledger:** before you claim a root cause, list every link in the causal chain and mark each one *measured* or *assumed* — do not file or declare until the assumed links are closed. (In a live trace, being asked to enumerate this immediately exposed the one unproven link.)
 6. **Diagnose WHERE the time/resource goes.** When something is slow or stuck, measure where it spends its time — don't retry-bigger or bump the timeout.
 7. **Map the blast radius before you change shared state.** If the fix DELETES, MUTATES, or REPURPOSES persistent/shared state (beads, rows, labels, columns, cursors, files), enumerate **every consumer first** — grep the code *and the docs* (incl. the official docs, https://docs.gascityhall.com/llms-full.txt) for who reads it. State that looks like dead bookkeeping may be a ledger, a cursor, or a last-run marker; deleting it erases semantics other code depends on. Don't change it until it's provably unreferenced or its consumers are migrated. If it serves more than one purpose, **separate the concerns** — don't blunt-delete.
 8. **Patch + a failing test (TDD).** Watch it fail for the right reason, then write the minimal fix. For a delete/mutate fix, the test must cover the *semantics the touched data serves* (each consumer from the step above), not just the mechanics of your change.
@@ -61,6 +61,7 @@ See `references/gas-stack-map.md` for the **"which layer owns this symptom"** he
 - A falsifiable hypothesis or it's not a diagnosis — name the bias.
 - **Verify on real, production-scale data before claiming done.**
 - **Before deleting or mutating shared state, enumerate its consumers** — test the semantics it serves, not just your change.
+- **When your own arithmetic contradicts your conclusion** (demand ≫ capacity; rate × per-item-cost ≠ observed total), that contradiction is the thread to pull — usually the diagnosis itself — not a rounding error to wave off. (Live: 45 ms × 856/s ≈ 38 core-seconds/s is impossible on ~1 core; that contradiction *was* the diagnosis — queries were queuing, so the true per-shape rate was ~110/s, not 856/s.)
 - Nothing destructive without explicit go-ahead; capture state first.
 
 ## Red flags — STOP
@@ -77,6 +78,7 @@ Every row below is a real rationalization from a live trace, and every one was w
 | "Patch the layer showing the symptom." | Traverse to the owning layer. A gc-CPU symptom had a gc-lifecycle owner — but the identical symptom could live in gms. |
 | "These rows are just dead bookkeeping — safe to delete." | Prove it. Grep every reader first. Bloat another subsystem queries is a *ledger*, not garbage — deleting it erases history / last-run / cursor state. (gc PR #2929 was CHANGES_REQUESTED for exactly this — see `references/worked-examples.md`.) |
 | "I have a cleaner theory now." (your 2nd, 3rd…) | A *chain* of refuted hypotheses = you're pattern-matching the symptom, not measuring. Stop. Grep the **owning component's own decision-logs** (lifecycle outcomes, deferrals, gate/skip/drop reasons) — the root is often one line you haven't read. A single `deferred_by_wake_budget` line ended a 3-theory chain (debounce → busy-detector → multiline-paste). See worked example #3. |
+| "Now I have the complete picture." (said a 2nd+ time) | Declaring the root cause repeatedly and *revising it each time* = converging on a story, not measuring. Stop; partition what you have **measured** vs **assumed**, and resolve that gap before proceeding. (Live: the root cause was declared ~8 times, each revised — the tell was the re-declaration itself.) |
 | "The agent is CPU-starved / hung." | Read the **process state**, don't infer it. Asleep in `ep_poll` (`S` / `wchan`) at 2% CPU = idle/waiting, not starved or hung — even on a genuinely saturated box. `ps -o stat,pcpu,wchan,etime` before you blame CPU. |
 
 **Any of these means: stop and go back to the trace.**
@@ -86,5 +88,5 @@ Every row below is a real rationalization from a live trace, and every one was w
 - `references/gas-stack-map.md` — the stack, which-layer-owns-this, upstream repos, dolt vs doltlite, the go.mod-source-of-truth rule.
 - `references/gc-diagnostic-toolkit.md` — binary symbol-grep, dolt `SHOW PROCESSLIST` + connection mapping, CPU-vs-load, bead-store/tier layout, doltlite inspection.
 - `references/upstreaming-fixes.md` — patch → prove → dogfood → rebase → PR (to the right repo) + a PR-body template.
-- `references/worked-examples.md` — three real traces, end to end, each showing the layer hop.
+- `references/worked-examples.md` — four real traces, end to end, each showing the layer hop.
 - `references/safety-floor.md` — capture-state-first; the don't-without-go-ahead list.
