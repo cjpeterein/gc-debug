@@ -29,7 +29,7 @@ High CPU, slow `bd`/queries, OOM, store/noms bloat, stalls, full-table scans, or
 | `references/gas-stack-map.md` | The dependency map, a "which layer owns this symptom" table, the upstream repo per layer, the go.mod-is-source-of-truth rule, and the dolt-vs-doltlite split. |
 | `references/gc-diagnostic-toolkit.md` | Binary symbol-grep, dolt `SHOW PROCESSLIST` + connection mapping, CPU-vs-load (PSI/mpstat), bead-store/tier layout, doltlite inspection. |
 | `references/upstreaming-fixes.md` | patch → prove → dogfood → rebase → PR, with a PR-body template. |
-| `references/worked-examples.md` | The two traces, end to end, each showing the layer hop. |
+| `references/worked-examples.md` | Four real traces, end to end, each showing the layer hop. |
 | `references/safety-floor.md` | Capture-state-first; the don't-without-go-ahead list. |
 
 ## Status

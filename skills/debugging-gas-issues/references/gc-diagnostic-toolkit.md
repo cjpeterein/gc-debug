@@ -40,6 +40,28 @@ pidstat 3 1 | awk '/^Average:/ && $3 ~ /^[0-9]+$/ {cpu[$NF]+=$8} END{for(c in cp
 ```
 Aggregates sustained CPU by command. (`ps` %CPU is lifetime-average — misleading for "now".)
 
+### Userspace vs syscall attribution (is dolt CPU in SQL execution or connection/IO?)
+
+Per-thread `utime`/`stime` answer whether the CPU is burned **executing SQL** (userspace) or **handling connections/IO** (syscall). Sum field 14 (utime) vs 15 (stime) across the process's threads:
+
+```bash
+PID=<dolt-pid>
+awk '{u+=$14; s+=$15} END{printf "utime=%d stime=%d  utime%%=%.0f\n", u, s, 100*u/(u+s)}' \
+  /proc/$PID/task/*/stat
+```
+(Live: ~92% utime → execution-bound, which **ruled out** connection-churn as the sink.) Complements host-level PSI/mpstat and per-process `pidstat` with per-thread granularity.
+
+### Measure what a connection pool would actually save
+
+Before hypothesizing "add pooling," measure it: compare dolt CPU jiffies for N queries via **fresh-conn-per-query** vs a **single persistent conn** — read `/proc/<dolt-pid>/stat` fields 14+15 (utime+stime) before and after each run:
+
+```bash
+J(){ awk '{print $14+$15}' /proc/$PID/stat; }
+b=$(J); for i in $(seq 1 200); do DSQL "<query>"; done;        echo "fresh-conn:  $(( $(J) - b )) jiffies"   # new conn each call
+b=$(J); DOLT_CLI_PASSWORD='' dolt --host 127.0.0.1 --port "$PORT" --user root --no-tls sql <<<"$(yes '<query>;' | head -200)"; echo "persistent: $(( $(J) - b )) jiffies"
+```
+(Live: 19.5 s vs 16.55 s for 200 queries → pooling saves ~15%; query *execution* is the other 85%.) Note `bd` **already** has a `database/sql` pool — defeated by **process-per-CLI-invocation**, so "add a pool" actually means "make `bd` a daemon." Stops an ~11–15% lever from being mistaken for the fix.
+
 ## dolt server introspection
 
 ```bash
@@ -51,6 +73,17 @@ DSQL "SHOW GLOBAL STATUS WHERE Variable_name IN ('Questions','Com_select','Slow_
 DSQL "USE \`<db>\`; EXPLAIN <query>"; DSQL "USE \`<db>\`; SHOW INDEX FROM <table>"                                              # plan + indexes
 ```
 Sample `Questions` twice to get QPS. **`Slow_queries`=0 + huge `Com_select` = a volume problem (gc/bd), not a slow-query problem (gms).**
+
+### Rate vs duration — "always caught running" is not a frequency
+
+A query that *dominates* `PROCESSLIST` samples is measuring **duration-share**, not frequency: one slow query holds a sample even at low call-rate. Sampling `Questions` gives **all-query** QPS, not per-shape. For the true rate of a *specific* query shape, count **distinct connection-ids** running it over a window:
+
+```bash
+for i in $(seq 1 100); do
+  DSQL "SELECT id FROM information_schema.processlist WHERE info LIKE '%<query-sig>%'"
+done | sort -u | wc -l    # distinct conns over the window / window-seconds = per-shape rate
+```
+(Live: 1102 distinct conns in 10 s → ~110/s — versus the ~856/s a naive duration-share read implied.)
 
 Map which processes hold connections (find the culprit client):
 ```bash

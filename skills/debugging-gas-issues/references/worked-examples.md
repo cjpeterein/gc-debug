@@ -1,6 +1,6 @@
 # Worked examples
 
-Three real traces. Each shows the **layer hop** (symptom layer ≠ owner layer); #2 also shows the two gates *after* the trace — the **dogfood (scale)** gate and the **consumer/semantics** gate; #3 shows how a **chain of refuted theories** ends the moment you read the component's own logs. Read them for the *shape* of the method, not the specifics.
+Four real traces. Each shows the **layer hop** (symptom layer ≠ owner layer); #2 also shows the two gates *after* the trace — the **dogfood (scale)** gate and the **consumer/semantics** gate; #3 shows how a **chain of refuted theories** ends the moment you read the component's own logs; #4 shows a **volume problem that is an amplifier, not a bloated table** — a wake loop broader than the work it checks for. Read them for the *shape* of the method, not the specifics.
 
 ## 1. The fork-storm OOM — symptom: dolt; owner: bd
 
@@ -38,3 +38,15 @@ Three real traces. Each shows the **layer hop** (symptom layer ≠ owner layer);
 | **Owner** | **gc** (`gastownhall/gascity`, reconciler scheduling). The CPU saturation only *amplified* it — measured 93% used / 0% steal, and the "starved" agent was asleep in `ep_poll` at 2% CPU (idle, **not** CPU-starved). |
 | **Fix + upstream** | Sort each dependency wave's ready candidates **least-recently-woken first** (`last_woke_at` → `CreatedAt`) before spending the budget; winning a wake updates `last_woke_at` → rotation → no permanent starvation. Red→green test; dogfooded that `last_woke_at` is populated/updated on the real fleet. Upstream: **gc PR #3059**. |
 | **Transferable lessons** | (1) **A chain of refuted hypotheses means you're theorizing, not measuring** — read the owning component's decision-logs *early*; the root was one `deferred_by_wake_budget` line. (2) Read **process state** (`ep_poll`/`S`/2% CPU = idle, not starved) — don't infer "CPU-starved" from load. (3) When a **budget/limit defers work, the selection method is the bug surface** — a *stable* order starves the same victims; fairness (least-recently-woken / round-robin) fixes it. |
+
+## 4. The wake-amplifier — symptom: dolt CPU; owner: gc (event relevance too broad)
+
+| Step | What happened |
+|---|---|
+| **Symptom** | The `dolt sql-server` pinned ~114% CPU; system load 8.7 but **56% CPU idle** — vCPU contention, not saturation. |
+| **Naive read** | "It's the bloated `hq` store again — shrink the history." (Nearly identical to #2; the pull toward *re-running the prior fix* was the trap. The bloat was real but it was the *multiplicand*, not the bug.) |
+| **The contradiction that broke it** | Duration-share read said ~856 assembly-queries/s; 45 ms × 856/s ≈ 38 core-seconds/s is impossible on ~1 core. Re-measured by **distinct connection-ids** (toolkit: rate-vs-duration) → ~110/s. The arithmetic contradiction was the thread: queries were *queuing*, and the question became "what fires ~110 queries/s," not "why is each query slow." |
+| **Trace** | Per-agent serve loop (`runWorkflowServeFollow`) re-runs its work query on every wake. `workflowEventRelevant()` (`cmd/gc/dispatch_runtime.go:630`) keys on `evt.Type` **only** (`BeadCreated/Updated/Closed`), ignoring `evt.Subject`/assignee/rig/`gc.routed_to`. So **any** bead event anywhere wakes **every** agent's serve loop and resets `idleSweeps=0` (line 566), defeating the 1s→30s exponential backoff (`followSleepDuration`). Order churn (~27 orders firing every 1–2 min; each order-run tracking-wisp lifecycle = create→update→update→close ≈ 4 events) → ~2.9 events/s on `.gc/events.jsonl` → all ~6 serve loops re-query at the 1s floor → ~110 assembly-query exec/s against the bloated `hq` (12k wisps / 45k labels), 39–96 ms each → ~5+ core-seconds/s demand vs ~1 core → dolt pinned. |
+| **Owner** | **gc** (`gastownhall/gascity`, `cmd/gc/dispatch_runtime.go`) — **not** dolt/gms; the query plan is fine. |
+| **Fix shape** | Scope event relevance to events that could match **this** agent's work query (subject/assignee/rig/`gc.routed_to`); the backoff then engages and the query rate collapses ~10×. **Non-destructive** — does *not* touch the order-run ledger (the #2 / gc#2929 landmine). Filed as gascity bead **gc-6av**. |
+| **Transferable lesson** | A volume problem is **not always a bloated table** — it can be an **amplifier**: an event/poll loop whose wake condition is *broader* than the work it actually checks for. Measure the event-bus rate and correlate it to the query rate; a globally-scoped wake condition multiplies a cheap per-item cost by N loops. (And: resist re-running the previous fix just because the symptom matches — #2's bloat was present here too but was the multiplicand, not the bug.) |
