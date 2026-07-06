@@ -1,5 +1,5 @@
 [pack]
 name = "gc-debug"
-version = "1.1.0"
+version = "1.2.0"
 schema = 2
 description = "Trace complex Gas* (gc, bd/beads, dolt, go-mysql-server, doltlite) issues to root cause across the dependency stack, prove the fix on real data, and land a mergeable upstream PR."

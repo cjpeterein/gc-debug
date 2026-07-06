@@ -24,7 +24,8 @@ High CPU, slow `bd`/queries, OOM, store/noms bloat, stalls, full-table scans, or
 
 | File | What it covers |
 |---|---|
-| `SKILL.md` | The arc (capture state → evidence → **find the owning layer** → source-trace → RCA → diagnose-where-time-goes → TDD → **dogfood on real data** → upstream PR), the iron laws, and a red-flags table where every entry is a real mistake from a live trace. |
+| `SKILL.md` | The arc (capture state → evidence → **find the owning layer** → source-trace → RCA → diagnose-where-time-goes → **challenge the diagnosis** → TDD → **dogfood on real data** → upstream PR), the iron laws, and a red-flags table where every entry is a real mistake from a live trace. |
+| `references/challenging-the-diagnosis.md` | The skeptic pass and challenge checklist that stop a fishy-looking lead from being adopted as "the cause" — disconfirming prediction, un-excluded alternatives, causation-not-correlation, proof past the recurrence window, the confidence ladder, and scaling rigor to the cost of acting. |
 | `references/gas-stack-map.md` | The dependency map, a "which layer owns this symptom" table, the upstream repo per layer, the go.mod-is-source-of-truth rule, and the dolt-vs-doltlite split. |
 | `references/gc-diagnostic-toolkit.md` | Binary symbol-grep, dolt `SHOW PROCESSLIST` + connection mapping, CPU-vs-load (PSI/mpstat), bead-store/tier layout, doltlite inspection. |
 | `references/upstreaming-fixes.md` | patch → prove → dogfood → rebase → PR, with a PR-body template. |
